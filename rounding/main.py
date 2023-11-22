@@ -15,68 +15,73 @@ headers = {
     "Content-Type": "application/json",
     "Notion-Version": "2022-06-28"
 }
-url = f'https://api.notion.com/v1/databases/{database_id_final_qualifi}/query'
+url = f'https://api.notion.com/v1/databases/{database_id_draw}/query'
 
 
 response = requests.post(url, headers=headers)
 data = response.json()
 resp_data = data["results"]
 
+chk_resp_data = [item for item in resp_data if item.get('properties', {}).get('승자', {}).get('status', {}).get('name') == '미정']
+
+## 검증역역 - 시작
+
+if(len(chk_resp_data) > 0):
+    alert_msg = "경기 결과 미등록 출전자 명단:\n"
+    for rsep_elem in chk_resp_data:
+        alert_msg += "\t- "+str(rsep_elem["properties"]["이름"]["title"][0]["text"]["content"])+"\n"
+    alert_msg += "위 출전자들의 경기 결과(승자)를 기록 후 다시 수행하세요"
+    print(alert_msg)
+    exit() #테스트종료
+
 # '조' 키가 가지고 있는 값들을 추출합니다.
-values = [temp_storage["properties"]['조']['number'] for temp_storage in resp_data]
-
+validation_values = [temp_storage["properties"]['팀']['number'] for temp_storage in resp_data]
+# None 값 제거
+validation_values = [x for x in validation_values if x is not None]
 # 중복을 제거하고 오름차순으로 정렬합니다.
-unique_sorted_values = sorted(set(values))
+validation_sorted_values = sorted(set(validation_values))
 
-refind_first_team = []
-refind_second_team = []
+for target_team in validation_sorted_values:
+    inner_validation_values = [item for item in resp_data if item.get('properties', {}).get('팀', {}).get('number', {}) == target_team]
+    inner_final_validation_values = [temp_storage["properties"]['승자']['status']['name'] for temp_storage in inner_validation_values]
+    if inner_final_validation_values.count('승') > 1:
+        print("한 경기에 승자가 두 팀이 존재 할 수 없습니다. \n \t-\t"+str(target_team)+"target_team")
+        exit() #테스트종료
+    else:
+        # 아마 위에서 처리 되겠지만 추가적인 조치
+        print("경기 결과가 아직 기록되지 않은 팀입니다. \n \t-\t"+str(target_team)+"target_team")
+        exit() #테스트종료
 
-# 존재하는 조 만큼 반복
-for idx, elem in enumerate(unique_sorted_values):
+## 검증역역 - 종료 ++ BYE가 '패'가 아니면 안 되게 검증 필요
 
+resp_data = [item for item in resp_data if item.get('properties', {}).get('승자', {}).get('status', {}).get('name') == '승']
 
-    # 조 별로 1,2위 추출
-    temp_jo_group = [item for item in resp_data if item.get('properties', {}).get('조', {}).get('number', {}) == elem]
-    temp_jo_group1 = [item for item in temp_jo_group if item.get('properties', {}).get('순위', {}).get('select', {}).get('name', {}) in ['1위']]
-    temp_jo_group2 = [item for item in temp_jo_group if item.get('properties', {}).get('순위', {}).get('select', {}).get('name', {}) in ['2위']]
+refind_json = []
 
-    refind_first_team.append(temp_jo_group1[0])
-    refind_second_team.append(temp_jo_group2[0])
+for idx, elem in enumerate(resp_data):
 
+    temp_json = {}
 
-# unique_sorted_values <-- 이 배열에 keys 담겨있음
+    temp_json["id"] = elem["id"]
+    temp_json["totalscore"] = elem["properties"]["점수"]["number"]
+    temp_json["team"] = elem["properties"]["이름"]["title"][0]["text"]["content"]
 
-# print(len(refind_first_team))
-# print(len(refind_second_team))
+    refind_json.append(temp_json)
 
-sum_team_arr = refind_first_team + refind_second_team
-
-# print(len(sum_team_arr))
-
-
-# print(resp_data[0]["id"]) # 페이지 id
-# print(resp_data[0]["properties"]["상태"]["status"]["name"]) # 항목: 상태 (확정, 환불예정, 취소)
-# print(resp_data[0]["properties"]["합산점수"]["number"]) # 항목: 합산점수
-# print(resp_data[0]["properties"]["신청자명"]["title"][0]["text"]["content"]) # 항목: 신청자 명
-# print(resp_data[0]["properties"]["파트너명"]["rich_text"][0]["text"]["content"]) # 항목: 파트너 명
-
-
-# for idx, elem in enumerate(resp_data):
-
-#     temp_json = {}
-
-#     temp_json["id"] = elem["id"]
-#     temp_json["status"] = elem["properties"]["상태"]["status"]["name"]
-#     temp_json["totalscore"] = elem["properties"]["합산점수"]["number"]
-#     temp_json["mainnm"] = elem["properties"]["신청자명"]["title"][0]["text"]["content"]
-#     temp_json["subnm"] = elem["properties"]["파트너명"]["rich_text"][0]["text"]["content"]
-
-#     refind_json.append(temp_json)
 
 # "totalscore" 키를 기준으로 정렬
-# sorted_json_data = sorted(refind_json, key=lambda x: x["totalscore"], reverse=True)
+sorted_json_data = sorted(refind_json, key=lambda x: x["totalscore"], reverse=True)
 
-# print(len(sorted_json_data))
+new_array = []
+
+while sorted_json_data:
+    # 첫 번째 항목을 pop하고 새로운 배열에 append
+    new_array.append(sorted_json_data.pop(0))
+
+    # 맨 마지막 항목을 pop하고 새로운 배열에 append
+    new_array.append(sorted_json_data.pop(-1))
+
+# print(new_array)
 
 def generate_bracket(teams):
 
@@ -249,5 +254,4 @@ def generate_data_frame_LINE(tpp):
 
     return data_re
 
-
-generate_bracket(sum_team_arr)
+generate_bracket(new_array)
