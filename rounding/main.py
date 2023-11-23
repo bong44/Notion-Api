@@ -22,6 +22,33 @@ response = requests.post(url, headers=headers)
 data = response.json()
 resp_data = data["results"]
 
+if(len(resp_data)<1):
+    print('예선 -> 본선대진 작성 후 수행가능합니다.')
+    exit() #테스트종료
+
+# '라운드' 키가 가지고 있는 값들을 추출합니다.
+all_round_values = [temp_storage['properties']['라운드']['multi_select'][0]['name'] for temp_storage in resp_data]
+# 중복을 제거하고 오름차순으로 정렬합니다
+all_round_values = sorted(set(all_round_values))
+
+try:
+    all_round_values = [int(item.replace('강', '')) for item in all_round_values]
+except Exception as e:
+    # 예상하지 못한 다른 예외가 발생한 경우 처리할 코드를 작성합니다.
+    print(f"매치가 종료되었습니다. \n(새로운 매치를 위해선 모든 항목을 삭제해 주세요)")
+    exit() #테스트종료
+
+find_lowest_round = str(sorted(all_round_values)[0])+'강'
+
+resp_data = [item for item in resp_data if item.get('properties', {}).get('라운드', {}).get('multi_select', {})[0].get('name') == find_lowest_round]
+
+# BYE 있는 라운드인지 플레그 설정
+bye_check = [temp_storage['properties']['이름']['title'][0]['text']['content'] for temp_storage in resp_data]
+bye_check = sorted(set(bye_check))
+
+# 'BYE'가 배열에 있는지 여부를 확인 (전역변수로 사용)
+bye_check_result = 'BYE' in bye_check
+
 chk_resp_data = [item for item in resp_data if item.get('properties', {}).get('승자', {}).get('status', {}).get('name') == '미정']
 
 ## 검증역역 - 시작
@@ -34,7 +61,7 @@ if(len(chk_resp_data) > 0):
     print(alert_msg)
     exit() #테스트종료
 
-# '조' 키가 가지고 있는 값들을 추출합니다.
+# '팀' 키가 가지고 있는 값들을 추출합니다.
 validation_values = [temp_storage["properties"]['팀']['number'] for temp_storage in resp_data]
 # None 값 제거
 validation_values = [x for x in validation_values if x is not None]
@@ -45,14 +72,14 @@ for target_team in validation_sorted_values:
     inner_validation_values = [item for item in resp_data if item.get('properties', {}).get('팀', {}).get('number', {}) == target_team]
     inner_final_validation_values = [temp_storage["properties"]['승자']['status']['name'] for temp_storage in inner_validation_values]
     if inner_final_validation_values.count('승') > 1:
-        print("한 경기에 승자가 두 팀이 존재 할 수 없습니다. \n \t-\t"+str(target_team)+"target_team")
+        print("한 경기에 승자가 두 팀이 존재 할 수 없습니다. \n \t "+str(target_team)+"번 팀")
         exit() #테스트종료
-    else:
+    elif inner_final_validation_values.count('미정') > 0:
         # 아마 위에서 처리 되겠지만 추가적인 조치
-        print("경기 결과가 아직 기록되지 않은 팀입니다. \n \t-\t"+str(target_team)+"target_team")
+        print("경기 결과가 아직 기록되지 않은 팀입니다. \n \t- "+str(target_team)+"번 팀")
         exit() #테스트종료
 
-## 검증역역 - 종료 ++ BYE가 '패'가 아니면 안 되게 검증 필요
+## 검증역역 - 종료 ++ BYE가 '패'가 아니면 안 되게 검증 필요 
 
 resp_data = [item for item in resp_data if item.get('properties', {}).get('승자', {}).get('status', {}).get('name') == '승']
 
@@ -69,19 +96,24 @@ for idx, elem in enumerate(resp_data):
     refind_json.append(temp_json)
 
 
-# "totalscore" 키를 기준으로 정렬
-sorted_json_data = sorted(refind_json, key=lambda x: x["totalscore"], reverse=True)
+if(bye_check_result):
+    #BYE 존재 배열 섞기
+    # "totalscore" 키를 기준으로 정렬
+    sorted_json_data = sorted(refind_json, key=lambda x: x["totalscore"], reverse=True)
 
-new_array = []
+    new_array = []
 
-while sorted_json_data:
-    # 첫 번째 항목을 pop하고 새로운 배열에 append
-    new_array.append(sorted_json_data.pop(0))
+    while sorted_json_data:
+        # 첫 번째 항목을 pop하고 새로운 배열에 append
+        new_array.append(sorted_json_data.pop(0))
 
-    # 맨 마지막 항목을 pop하고 새로운 배열에 append
-    new_array.append(sorted_json_data.pop(-1))
+        # 맨 마지막 항목을 pop하고 새로운 배열에 append
+        new_array.append(sorted_json_data.pop(-1))
 
-# print(new_array)
+else:
+    #BYE 없음 기존 순서대로
+    new_array = refind_json
+
 
 def generate_bracket(teams):
 
@@ -106,7 +138,10 @@ def generate_bracket(teams):
     temp_idx = 0
 
     # 1라운드 강수
-    tpp = bye_teams + len(teams)
+    if(bye_teams + len(teams) == 2):
+        tpp = "결승"
+    else:
+        tpp = str(bye_teams + len(teams))+"강"
 
     # 대진표 생성
     while teams:  # 리스트가 비어 있지 않은 동안 반복
@@ -138,14 +173,8 @@ def generate_bracket(teams):
 
 def generate_data_frame(data, tpp, win,tidx):
 
-    original_string = data["properties"]["순위"]["select"]["name"]
-    jo_num = data["properties"]["조"]["number"]
+    jo_num = data["totalscore"]
 
-    # 문자열을 슬라이싱하여 "1"을 가져오기
-    number_part = original_string[:-1]
-
-    # 숫자로 변환하기
-    result_number = int(number_part)
 
     # 요청 본문 데이터 설정
     data_re = {
@@ -156,7 +185,7 @@ def generate_data_frame(data, tpp, win,tidx):
                 "title": [  # 'title' 속성을 배열로 변경
                     {
                         "text": {
-                            "content": data["properties"]["이름"]["title"][0]["text"]["content"]
+                            "content": data["team"]
                         }
                     }
                 ]
@@ -164,7 +193,7 @@ def generate_data_frame(data, tpp, win,tidx):
             "라운드": {
                 "multi_select": [  # 'title' 속성을 배열로 변경
                     {
-                        "name": str(tpp)+"강"
+                        "name": tpp
                         , "color":"gray"
                     }
                 ]
@@ -175,7 +204,7 @@ def generate_data_frame(data, tpp, win,tidx):
                 }
             },
             "점수": {
-                "number": result_number+jo_num
+                "number": jo_num
             },
             "팀": {
                 "number": tidx
@@ -204,7 +233,7 @@ def generate_data_frame_BYE(tpp,tidx):
             "라운드": {
                 "multi_select": [  # 'title' 속성을 배열로 변경
                     {
-                        "name": str(tpp)+"강"
+                        "name": tpp
                         , "color":"gray"
                     }
                 ]
@@ -239,7 +268,7 @@ def generate_data_frame_LINE(tpp):
             "라운드": {
                 "multi_select": [  # 'title' 속성을 배열로 변경
                     {
-                        "name": str(tpp)+"강"
+                        "name": tpp
                         , "color":"gray"
                     }
                 ]
